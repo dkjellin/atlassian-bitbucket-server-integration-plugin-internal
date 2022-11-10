@@ -6,6 +6,8 @@ import com.atlassian.bitbucket.jenkins.internal.scm.BitbucketSCM;
 import com.atlassian.bitbucket.jenkins.internal.scm.BitbucketSCMRepository;
 import com.atlassian.bitbucket.jenkins.internal.scm.BitbucketSCMSource;
 import com.atlassian.bitbucket.jenkins.internal.trigger.events.*;
+import com.atlassian.bitbucket.jenkins.internal.trigger.revision.PullRequestSCMHead;
+import com.atlassian.bitbucket.jenkins.internal.trigger.revision.PullRequestSCMRevision;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.plugins.git.GitSCM;
 import hudson.scm.SCM;
@@ -15,6 +17,7 @@ import hudson.triggers.Trigger;
 import hudson.triggers.TriggerDescriptor;
 import jenkins.model.Jenkins;
 import jenkins.model.ParameterizedJobMixIn;
+import jenkins.plugins.git.AbstractGitSCMSource;
 import jenkins.plugins.git.GitBranchSCMHead;
 import jenkins.plugins.git.GitBranchSCMRevision;
 import jenkins.scm.api.*;
@@ -228,7 +231,7 @@ public class BitbucketWebhookConsumer {
      * or closing the pull request.
      * @since 3.0.0
      */
-    private static class BitbucketSCMHeadPullRequestEvent extends SCMHeadEvent<PullRequestWebhookEvent> {
+    public static class BitbucketSCMHeadPullRequestEvent extends SCMHeadEvent<PullRequestWebhookEvent> {
 
         public BitbucketSCMHeadPullRequestEvent(Type type, PullRequestWebhookEvent payload, String origin) {
             super(type, payload, origin);
@@ -250,8 +253,14 @@ public class BitbucketWebhookConsumer {
             }
 
             BitbucketPullRequestRef fromRef = getPayload().getPullRequest().getFromRef();
-            return Collections.singletonMap(new GitBranchSCMHead(fromRef.getDisplayId()),
-                    new GitBranchSCMRevision(new GitBranchSCMHead(fromRef.getDisplayId()), fromRef.getLatestCommit()));
+            BitbucketPullRequestRef toRef = getPayload().getPullRequest().getToRef();
+            
+            PullRequestSCMHead pullRequestHead = new PullRequestSCMHead(getPayload().getPullRequest());
+            PullRequestSCMRevision pullRequestRevision = new PullRequestSCMRevision(pullRequestHead,
+                    new AbstractGitSCMSource.SCMRevisionImpl(pullRequestHead, fromRef.getLatestCommit()),         // source revision
+                new AbstractGitSCMSource.SCMRevisionImpl(pullRequestHead.getTarget(), toRef.getLatestCommit()));  // target revision
+            
+            return Collections.singletonMap(pullRequestHead, pullRequestRevision);
         }
 
         @Override

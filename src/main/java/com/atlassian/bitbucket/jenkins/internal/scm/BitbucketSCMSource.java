@@ -9,13 +9,17 @@ import com.atlassian.bitbucket.jenkins.internal.credentials.JenkinsToBitbucketCr
 import com.atlassian.bitbucket.jenkins.internal.model.BitbucketNamedLink;
 import com.atlassian.bitbucket.jenkins.internal.model.BitbucketRepository;
 import com.atlassian.bitbucket.jenkins.internal.status.BitbucketRepositoryMetadataAction;
+import com.atlassian.bitbucket.jenkins.internal.trigger.BitbucketWebhookConsumer;
 import com.atlassian.bitbucket.jenkins.internal.trigger.BitbucketWebhookMultibranchTrigger;
 import com.atlassian.bitbucket.jenkins.internal.trigger.RetryingWebhookHandler;
 import com.atlassian.bitbucket.jenkins.internal.trigger.events.AbstractWebhookEvent;
 import com.atlassian.bitbucket.jenkins.internal.trigger.register.WebhookRegistrationFailed;
+import com.atlassian.bitbucket.jenkins.internal.trigger.revision.PullRequestSCMHead;
+import com.atlassian.bitbucket.jenkins.internal.trigger.revision.PullRequestSCMRevision;
 import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import com.cloudbees.plugins.credentials.Credentials;
 import com.google.common.annotations.VisibleForTesting;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.Extension;
 import hudson.model.Action;
@@ -34,6 +38,7 @@ import jenkins.scm.api.*;
 import jenkins.scm.api.metadata.PrimaryInstanceMetadataAction;
 import jenkins.scm.api.trait.SCMSourceTrait;
 import jenkins.scm.api.trait.SCMSourceTraitDescriptor;
+import jenkins.scm.impl.ChangeRequestSCMHeadCategory;
 import jenkins.scm.impl.TagSCMHeadCategory;
 import jenkins.scm.impl.UncategorizedSCMHeadCategory;
 import jenkins.scm.impl.form.NamedArrayList;
@@ -273,6 +278,16 @@ public class BitbucketSCMSource extends SCMSource {
     }
 
     @Override
+    protected SCMRevision retrieve(@NonNull SCMHead head,
+                                   @NonNull TaskListener listener) throws IOException, InterruptedException {
+        if (head instanceof PullRequestSCMHead) {
+            
+        }
+        
+        return super.retrieve(head, listener);
+    }
+
+    @Override
     protected void retrieve(@CheckForNull SCMSourceCriteria criteria, SCMHeadObserver observer,
                             @CheckForNull SCMHeadEvent<?> event,
                             TaskListener listener) throws IOException, InterruptedException {
@@ -282,7 +297,20 @@ public class BitbucketSCMSource extends SCMSource {
                                " Check the configuration before running this job again.");
                 return;
             }
-            getAndInitializeGitSCMSourceIfNull().accessibleRetrieve(criteria, observer, event, listener);
+            getAndInitializeGitSCMSourceIfNull().accessibleRetrieve(criteria, new SCMHeadObserver() {
+                @Override
+                public void observe(@NonNull SCMHead head,
+                                    @NonNull SCMRevision revision) throws IOException, InterruptedException {
+                    if(event instanceof BitbucketWebhookConsumer.BitbucketSCMHeadPullRequestEvent) {
+                        BitbucketWebhookConsumer.BitbucketSCMHeadPullRequestEvent prEvent =
+                                (BitbucketWebhookConsumer.BitbucketSCMHeadPullRequestEvent) event;
+                       observer.observe(new PullRequestSCMHead(prEvent.getPayload().getPullRequest()), new PullRequestSCMRevision(new PullRequestSCMHead(prEvent.getPayload().getPullRequest()), 
+                               revision, revision)); 
+                    } else {
+                        observer.observe(head, revision);
+                    }
+                }
+            }, event, listener);
         }
     }
 
@@ -481,7 +509,7 @@ public class BitbucketSCMSource extends SCMSource {
             return formValidation.doTestConnection(context, serverId, credentialsId, projectName, repositoryName,
                     mirrorName);
         }
-
+        
         @Override
         public String getDisplayName() {
             return "Bitbucket server";
@@ -520,7 +548,11 @@ public class BitbucketSCMSource extends SCMSource {
 
         @Override
         protected SCMHeadCategory[] createCategories() {
-            return new SCMHeadCategory[]{UncategorizedSCMHeadCategory.DEFAULT, TagSCMHeadCategory.DEFAULT};
+            return new SCMHeadCategory[]{
+                    new UncategorizedSCMHeadCategory(Messages._BitbucketSCMSource_UncategorizedHeadCategory()),
+                    new TagSCMHeadCategory(Messages._BitbucketSCMSource_TagHeadCategory()),
+                    new ChangeRequestSCMHeadCategory(Messages._BitbucketSCMSource_ChangeRequestHeadCategory())
+            };
         }
 
         BitbucketScmHelper getBitbucketScmHelper(String bitbucketUrl, @CheckForNull Credentials httpCredentials) {
